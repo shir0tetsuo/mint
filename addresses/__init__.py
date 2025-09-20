@@ -5,6 +5,7 @@ import matplotlib.colors as mcolors
 import uuid
 import random
 from typing import Optional
+import string
 
 def read_file_as_list(file_path):
     '''Returns list of lines from file (UTF-8).'''
@@ -210,21 +211,58 @@ class AddressHandler:
                 seed_colors = [mcolors.to_hex(c) for c in seed_colors]
 
         # Return exactly n entries (0..n-1)
-        return {
+        table = {
             i: {
                 'glyph': seed_glyphs[i],
                 'color': seed_colors[i]
             }
             for i in range(n)
         }
+        return table
         
-    def generate_address(
+    def build(
             self, 
             seed:Optional[str]=None, 
             cols:int=9, 
-            rows:int=1
+            rows:int=1,
+            glyphs:str='Math1', 
+            colors:str='Beachgold',
+            glyph_values:Optional[list[int|str]]=None,
+            color_values:Optional[list[int|str]]=None,
+            n:Optional[int]=None, # Impacts color gradient resolution
+            *args, **kwds
         ):
 
-        
+        if glyph_values:
+            if len(glyph_values) > cols*rows:
+                glyph_values = glyph_values[:cols*rows]
 
-        return
+        if color_values:
+            if len(color_values) > cols*rows:
+                color_values = color_values[:cols*rows]
+
+        out = {}
+
+        # Seed handling — ensure deterministic output
+        if seed is None:
+            seed = self.new_seed()
+            print('New Table Seed:', seed)
+
+        table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n)
+
+        defaults = [random.choice(list(table.keys())) for _ in range(cols*rows)]
+
+        for idx, dv in enumerate(defaults):
+            out[idx] = {'glyph': None, 'color': None}
+            
+            out[idx]['default_glyph'] = table[dv]['glyph']
+            if glyph_values and idx < len(glyph_values):
+                dv = (dv if not isinstance(glyph_values[idx], int) else glyph_values[idx])
+            out[idx]['glyph'] = table[dv]['glyph']
+
+            out[idx]['default_color'] = table[dv]['color']
+            if color_values and idx < len(color_values):
+                dv = (dv if not isinstance(color_values[idx], int) else color_values[idx])
+            out[idx]['color'] = table[dv]['color']
+
+        return out
