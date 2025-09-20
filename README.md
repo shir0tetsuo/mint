@@ -1,4 +1,4 @@
-# __:coin: **LOUP 10K 2024**__
+# __🪙 **LOUP 10K 2024**__
 **1.75”** Zinc-Alloy Core, 4 mm thickness, Front: 3D + soft enamel colouring + laser engraving + UV print, Back: 3D + no colouring, Plating: Antique Silver; Sequential numbering (1-100), Cross-Cut Diamond Edge on both sides.
 ```
   🪙000 – 00- – Reserved (Direct Family)
