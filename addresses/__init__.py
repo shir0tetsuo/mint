@@ -4,7 +4,7 @@ import matplotlib.font_manager as fm
 import matplotlib.colors as mcolors
 import uuid
 import random
-from typing import Optional
+from typing import Optional, Any
 import string
 
 def read_file_as_list(file_path):
@@ -227,8 +227,8 @@ class AddressHandler:
             rows:int=1,
             glyphs:str='Math1', 
             colors:str='Beachgold',
-            glyph_values:Optional[list[int|str]]=None,
-            color_values:Optional[list[int|str]]=None,
+            glyph_values:Optional[list[int|Any]]=None,
+            color_values:Optional[list[int|Any]]=None,
             n:Optional[int]=None, # Impacts color gradient resolution
             *args, **kwds
         ):
@@ -253,16 +253,32 @@ class AddressHandler:
         defaults = [random.choice(list(table.keys())) for _ in range(cols*rows)]
 
         for idx, dv in enumerate(defaults):
-            out[idx] = {'glyph': None, 'color': None}
-            
+            out[idx] = {}
+
+            # --- Glyph ---
             out[idx]['default_glyph'] = table[dv]['glyph']
             if glyph_values and idx < len(glyph_values):
-                dv = (dv if not isinstance(glyph_values[idx], int) else glyph_values[idx])
-            out[idx]['glyph'] = table[dv]['glyph']
+                gv = glyph_values[idx]
+                if isinstance(gv, int):
+                    # Wrap around using modulo
+                    key = list(table.keys())[gv % len(table)]
+                else:
+                    # If string or something else, fallback to default
+                    key = gv if gv in table else dv
+            else:
+                key = dv
+            out[idx]['glyph'] = table[key]['glyph']
 
+            # --- Color ---
             out[idx]['default_color'] = table[dv]['color']
             if color_values and idx < len(color_values):
-                dv = (dv if not isinstance(color_values[idx], int) else color_values[idx])
-            out[idx]['color'] = table[dv]['color']
+                cv = color_values[idx]
+                if isinstance(cv, int):
+                    key = list(table.keys())[cv % len(table)]
+                else:
+                    key = cv if cv in table else dv
+            else:
+                key = dv
+            out[idx]['color'] = table[key]['color']
 
         return out
