@@ -7,8 +7,8 @@ import uuid
 import threading
 import numpy as np
 import random
-from typing import Optional, Any
-import string
+from typing import Optional, Any, Literal, Sequence, Union
+import numbers
 
 def read_file_as_list(file_path):
     '''Returns list of lines from file (UTF-8).'''
@@ -97,44 +97,111 @@ class Glyphs(PathMap):
             for filedata in [read_file_as_list(os.path.join(self.path, filename))]
         }
 
-class AddressHandler:
-    def __init__(
-            self, 
-            base_directory=os.getcwd(), 
-            glyph_subfolder='glyphtables', 
-            color_subfolder='colors'
-        ):
+class Helpers:
+    @staticmethod
+    def invert_hex_color(hex_color: str, keep_hash: bool = True) -> str:
+        """
+        Invert an RGB hex color (opposite values: 255 - component).
+        Accepts:
+        - '#rgb' or 'rgb'
+        - '#rrggbb' or 'rrggbb'
+        - '#rgba' or 'rgba'
+        - '#rrggbbaa' or 'rrggbbaa'
+        Preserves alpha (if provided) and returns lowercase hex.
+        Params:
+        hex_color: input hex string
+        keep_hash: whether to include leading '#' in return (default True)
+        Returns:
+        inverted hex string, e.g. '#00ff7f' or '#00ff7f80' (if alpha present)
+        Raises:
+        ValueError for invalid input lengths or invalid hex chars.
+        """
+        s = hex_color.strip()
+        if s.startswith('#'):
+            s = s[1:]
+        s = s.lower()
 
-        self.glyphs = Glyphs(base_directory, subfolder=glyph_subfolder)
-        self.colors = Colors(base_directory, subfolder=color_subfolder)
+        # Expand shorthand forms like 'abc' -> 'aabbcc', 'abcd' -> 'aabbccdd'
+        if len(s) in (3, 4):
+            s = ''.join(ch * 2 for ch in s)
 
-        self.lock = threading.RLock()
+        if len(s) not in (6, 8):
+            raise ValueError(f"Invalid hex color length: {len(s)} for {hex_color!r}")
 
-    def _rgba_to_hex(self, rgba):
-        """Accepts (r,g,b) or (r,g,b,a) with floats in 0..1 or ints in 0..255.
-        Returns '#rrggbb' (alpha ignored)."""
-        # handle numpy arrays or similar
+        # Validate hex characters
+        try:
+            int(s, 16)
+        except ValueError:
+            raise ValueError(f"Invalid hex color (non-hex digits): {hex_color!r}")
+
+        rgb_part = s[:6]
+        alpha_part = s[6:]  # '' if no alpha
+
+        # parse components
+        r = int(rgb_part[0:2], 16)
+        g = int(rgb_part[2:4], 16)
+        b = int(rgb_part[4:6], 16)
+
+        # invert each channel
+        r_inv = 255 - r
+        g_inv = 255 - g
+        b_inv = 255 - b
+
+        inverted = f"{r_inv:02x}{g_inv:02x}{b_inv:02x}"
+        if alpha_part:
+            inverted += alpha_part  # preserve alpha exactly as given
+
+        return ("#" if keep_hash else "") + inverted
+
+    @staticmethod
+    def _rgba_to_hex(rgba: Union[Sequence, object], keep_alpha: bool = False) -> str:
+        """
+        Accepts (`r,g,b`) or (`r,g,b,a`) where components are floats in `0..1` or ints in `0..255`.
+        Returns `'#rrggbb'` by default. If `keep_alpha=True` and alpha provided, returns `'#rrggbbaa'`.
+        """
+        # handle numpy arrays, pandas Series, etc.
         if hasattr(rgba, "tolist"):
             rgba = rgba.tolist()
 
-        if not isinstance(rgba, (tuple, list)):
+        if not isinstance(rgba, (list, tuple)):
             raise TypeError(f"Unsupported color type: {type(rgba)}")
 
-        # Extract r,g,b (ignore alpha if present)
         if len(rgba) < 3:
             raise ValueError(f"Color must have at least 3 components: {rgba!r}")
-        r, g, b = rgba[0], rgba[1], rgba[2]
 
         def to_byte(v):
-            # floats in [0,1] -> byte; ints assumed 0..255
-            if isinstance(v, float) and 0.0 <= v <= 1.0:
-                return int(round(v * 255))
-            return int(round(v))
+            if not isinstance(v, numbers.Real):
+                # allow numeric strings? you could attempt float(v) here, but be explicit
+                raise TypeError(f"Color component must be a number, got {type(v)} ({v!r})")
+            # treat floats in [0,1] as normalized
+            if isinstance(v, float) or (abs(v) <= 1 and not isinstance(v, int)):
+                # Defensive: convert with float and test range
+                fv = float(v)
+                if 0.0 <= fv <= 1.0:
+                    b = int(round(fv * 255))
+                else:
+                    # If float outside 0..1, treat as direct byte-ish and round
+                    b = int(round(fv))
+            else:
+                b = int(round(v))
+            # clamp to 0..255 to avoid bad hex formatting
+            if b < 0:
+                b = 0
+            elif b > 255:
+                b = 255
+            return b
 
+        r, g, b = rgba[0], rgba[1], rgba[2]
         r_x, g_x, b_x = map(to_byte, (r, g, b))
-        return "#{:02x}{:02x}{:02x}".format(r_x, g_x, b_x)
 
-    def _normalize_hex(self, s):
+        if keep_alpha and len(rgba) >= 4:
+            a = rgba[3]
+            a_x = to_byte(a)
+            return "#{:02x}{:02x}{:02x}{:02x}".format(r_x, g_x, b_x, a_x)
+        return "#{:02x}{:02x}{:02x}".format(r_x, g_x, b_x)
+    
+    @staticmethod
+    def _normalize_hex(s):
         """Normalize hex like '#abc' or 'abc' or '#aabbcc' -> '#aabbcc' (lowercase)."""
         s = s.strip()
         if s.startswith("#"):
@@ -146,21 +213,38 @@ class AddressHandler:
         return "#" + s.lower()
 
     # ANSI color helpers for terminal output
-    def ansi_color(self, rgb):
+    @staticmethod
+    def _ansi_color(rgb):
         """Return ANSI escape code for background color from hex string."""
         if rgb.startswith('#'):
             rgb = rgb[1:]
         r, g, b = int(rgb[0:2],16), int(rgb[2:4],16), int(rgb[4:6],16)
         return f"\033[48;2;{r};{g};{b}m"
 
-    def reset_color(self):
+    @staticmethod
+    def _reset_color():
         return "\033[0m"
-
-    def new_seed(self):
+    
+    @staticmethod
+    def _new_seed():
         '''Generates a new random seed.'''
         seed=str(uuid.uuid4())
         print('New seed: '+str(seed))
         return seed
+
+
+class AddressHandler(Helpers):
+    def __init__(
+            self, 
+            base_directory=os.getcwd(), 
+            glyph_subfolder='glyphtables', 
+            color_subfolder='colors'
+        ):
+
+        self.glyphs = Glyphs(base_directory, subfolder=glyph_subfolder)
+        self.colors = Colors(base_directory, subfolder=color_subfolder)
+        
+        self.lock = threading.RLock()
     
     def table_from_seed(
             self,
@@ -196,7 +280,7 @@ class AddressHandler:
 
         # Seed handling — ensure deterministic output
         if seed is None:
-            seed = self.new_seed()
+            seed = self._new_seed()
         random.seed(seed)
 
         # Deterministic selection + padding by cycling if necessary
@@ -261,7 +345,7 @@ class AddressHandler:
 
         # Seed handling — ensure deterministic output
         if seed is None:
-            seed = self.new_seed()
+            seed = self._new_seed()
 
         table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n)
 
@@ -298,78 +382,52 @@ class AddressHandler:
 
         return out
     
-    def to_png(
+    def __call__(
             self, 
+            
             seed:Optional[str]=None, 
+            seed_prefix:str='PTR-',
+            seed_length:Optional[int]=None,
+            
             cols:int=9, 
             rows:int=1,
+            
             glyphs:str='Math1', 
             colors:str='Beachgold',
+            
             glyph_values:Optional[list[int|Any]]=None,
             color_values:Optional[list[int|Any]]=None,
             n:Optional[int]=None, # Impacts color gradient resolution
+            
+            mode:Literal['terminal', 'png', 'both', 'none']='terminal',
             png_path:Optional[str]=None,
-            table:Optional[dict]=None,
             font_size:int=26,
-            dpi:int=300
+            small_default:bool=False,
+            small_size:int=12,
+            small_color:Optional[str]=None, # None = inverted
+            dpi:int=300,
+            lower_or_upper:Optional[Literal['lower', 'upper']]=None,
+
+            *args, **kwargs
         ):
 
-        seed = seed or self.new_seed()
+        # Validate inputs
+
+        seed = seed or self._new_seed()
+        glyphs = glyphs if glyphs in self.glyphs.maps else 'Math1'
+        colors = colors if colors in self.colors.maps else 'Beachgold'
 
         if font_size is None:
             font_size = self.glyphs.maps.get(glyphs)[2] or 26
-
-        table = table or self.build(
-            seed=seed, 
-            cols=cols, 
-            rows=rows,
-            glyphs=glyphs, 
-            colors=colors,
-            glyph_values=glyph_values,
-            color_values=color_values,
-            n=n
-        )
-
+        small_size = small_size or int(round(font_size / 2))
         font_path = os.path.join(self.glyphs.fontdir, self.glyphs.maps.get(glyphs)[1])
-        png_path = png_path or seed+".png"
-        
-        fig, ax = plt.subplots(figsize=(cols, rows+1), dpi=dpi)
-        fig.patch.set_alpha(0)
-        ax.set_xlim(0, cols)
-        ax.set_ylim(0, rows+1)
-        ax.axis('off')
-        ax.set_facecolor('none')
-        font_properties = fm.FontProperties(fname=font_path) if font_path else None
-        
-        for i in range(rows):
-            for j in range(cols):
-                symbol = table[i*cols + j]['glyph']
-                color = table[i*cols + j]['color']
-                rect = mpatches.Rectangle((j, rows-i-0.5), 1, 1, color=color)
-                ax.add_patch(rect)
-                ax.text(j+0.5, rows-i, symbol, ha='center', va='center', color='black', fontsize=font_size, fontproperties=font_properties)
 
-        ax.text(cols/2, 0.15, seed, ha='center', va='center', fontsize=16, color='gray')
-        with self.lock:
-            plt.savefig(png_path, bbox_inches='tight', dpi=dpi, transparent=True)
-        plt.close(fig)
-        return png_path
-    
-    def to_terminal(
-            self, 
-            seed:Optional[str]=None, 
-            cols:int=9, 
-            rows:int=1,
-            glyphs:str='Math1', 
-            colors:str='Beachgold',
-            glyph_values:Optional[list[int|Any]]=None,
-            color_values:Optional[list[int|Any]]=None,
-            n:Optional[int]=None, # Impacts color gradient resolution
-            export_png:bool=False,
-            png_path:Optional[str]=None,
-            font_size:int=26,
-            dpi:int=300
-        ):
+        output_ident = seed if seed_length is None else seed[:seed_length].replace('-','')
+        output_ident = output_ident.lower() if lower_or_upper == 'lower' else output_ident.upper() if lower_or_upper == 'upper' else output_ident
+        if seed_prefix:
+            output_ident = f"{seed_prefix}{output_ident}"
+
+        # Obtain build table
 
         table = self.build(
             seed=seed, 
@@ -382,41 +440,95 @@ class AddressHandler:
             n=n
         )
 
-        if export_png:
-            self.to_png(
-                seed=seed, 
-                cols=cols, 
-                rows=rows,
-                glyphs=glyphs, 
-                colors=colors,
-                glyph_values=glyph_values,
-                color_values=color_values,
-                n=n,
-                png_path=png_path,
-                table=table,
-                font_size=font_size,
-                dpi=dpi
+        if mode in ['none', None]:
+            return table
+
+        if mode in ['png', 'both']:
+            png_path = png_path or seed+".png" # Patch png_path
+            fig, ax = plt.subplots(figsize=(cols, rows+1), dpi=dpi)
+            fig.patch.set_alpha(0)
+            ax.set_xlim(0, cols)
+            ax.set_ylim(0, rows+1)
+            ax.axis('off')
+            ax.set_facecolor('none')
+            font_properties = fm.FontProperties(fname=font_path) if font_path else None
+
+            for i in range(rows):
+                for j in range(cols):
+                    symbol = table[i*cols + j]['glyph']
+                    color = table[i*cols + j]['color']
+                    
+                    # small_default
+                    default_symbol = table[i*cols + j]['default_glyph']
+                    #default_color = table[i*cols + j]['default_color']
+                    _small_color = small_color or self.invert_hex_color(color)
+                    
+                    rect = mpatches.Rectangle(
+                        (j, rows-i-0.5), 
+                        1, 
+                        1, 
+                        color=color
+                    )
+                    ax.add_patch(rect)
+                    ax.text(
+                        j+0.5, 
+                        rows-i, 
+                        symbol, 
+                        ha='center', 
+                        va='center', 
+                        color='black', 
+                        fontsize=font_size, 
+                        fontproperties=font_properties
+                    )
+
+                    # put small default symbol
+                    if default_symbol != symbol and small_default:
+                        ax.text(
+                            j+0.80, 
+                            rows-i-0.33, 
+                            default_symbol, 
+                            ha='center', 
+                            va='center', 
+                            color=_small_color, 
+                            fontsize=small_size, 
+                            fontproperties=font_properties,
+                            alpha=0.7
+                        )
+
+            ax.text(
+                cols/2, 
+                0.15, 
+                seed,#(seed if seed_length is None else seed[:seed_length]) if not seed_prefix else f"{seed_prefix}{(seed if seed_length is None else seed[:seed_length])}", 
+                ha='center', 
+                va='center', 
+                fontsize=16, 
+                color='gray'
             )
+            
+            with self.lock:
+                plt.savefig(png_path, bbox_inches='tight', dpi=dpi, transparent=True)
+            plt.close(fig)
 
         # Get terminal output
 
-        lines = []
-        current_row = []
+        if mode in ['terminal', 'both']:
+            lines = []
+            current_row = []
 
-        for idx, gt in enumerate(table.values()):
-            cell = self.ansi_color(gt['color']) + f" {gt['glyph']} " + self.reset_color()
-            current_row.append(cell)
+            for idx, gt in enumerate(table.values()):
+                cell = self._ansi_color(gt['color']) + f" {gt['glyph']} " + self._reset_color()
+                current_row.append(cell)
 
-            # End of row
-            if (idx + 1) % cols == 0:
+                # End of row
+                if (idx + 1) % cols == 0:
+                    lines.append("".join(current_row))
+                    current_row = []
+
+            # If the last row isn’t full (edge case)
+            if current_row:
                 lines.append("".join(current_row))
-                current_row = []
 
-        # If the last row isn’t full (edge case)
-        if current_row:
-            lines.append("".join(current_row))
+            for line in lines:
+                print(line)
 
-        for line in lines:
-            print(line)
-
-        return
+        return png_path
