@@ -631,7 +631,7 @@ class AddressHandler(Helpers):
             for i in range(rows):
                 for j in range(cols):
                     symbol = table[i*cols + j]['glyph']
-                    color = table[i*cols + j]['color']
+                    color = table[i*cols + j]['color'] # the bg color
                     symbol_color = (
                         self._invert_hex_color(color) if font_colors == 'inverted'
                         else self._choose_black_or_white(color) if font_colors == 'auto'
