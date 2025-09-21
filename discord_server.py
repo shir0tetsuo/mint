@@ -12,24 +12,23 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-# Import your existing generation module
-import to_terminal
+import addresses
 
-# ---------- Logging ----------
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("glyph-bot")
+log = logging.getLogger("discordbot")
 
-# ---------- Bot setup ----------
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 TREE = bot.tree
 
-# ---------- Config ----------
 ROOT_DIR = Path(__file__).parent
 PAGE_SIZE = 25  # Discord select menu max options per select
 
-# ---------- Helpers ----------
+AH = addresses.AddressHandler(ROOT_DIR)
+
+# Helpers to list files in a folder
+
 def _list_files_folder(folder: Path) -> Sequence[str]:
     if not folder.exists() or not folder.is_dir():
         return []
@@ -46,27 +45,18 @@ def _get_glyphtable_options() -> List[str]:
     if fs_opts:
         log.info("Loaded %d glyphtables from ./glyphtables", len(fs_opts))
         return fs_opts
-    fallback = list(getattr(to_terminal, "GLYPH_TABLES",
-                            getattr(to_terminal, "glyphtable_options",
-                                    getattr(to_terminal, "GLYPHTABLE_OPTIONS", ["default_glyphs"]))))
-    log.info("Using fallback glyphtable list of length %d", len(fallback))
-    return fallback
 
 def _get_color_options() -> List[str]:
     fs_opts = list(_list_files_folder(ROOT_DIR / "colors"))
     if fs_opts:
         log.info("Loaded %d colors from ./colors", len(fs_opts))
         return fs_opts
-    fallback = list(getattr(to_terminal, "COLOR_MAPS",
-                            getattr(to_terminal, "color_options",
-                                    getattr(to_terminal, "CMAP_OPTIONS", ["viridis", "gray"]))))
-    log.info("Using fallback color list of length %d", len(fallback))
-    return fallback
 
 GLYPH_ALL = _get_glyphtable_options()
 COLOR_ALL = _get_color_options()
 
-# ---------- Interaction debug ----------
+# Debug hook to log interactions
+
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     try:
@@ -81,7 +71,8 @@ async def on_interaction(interaction: discord.Interaction):
     except Exception:
         log.exception("Error in on_interaction debug hook")
 
-# ---------- UI: paginated select + paging buttons ----------
+# Interaction Builders
+
 def _build_options_page(items: Sequence[str], page: int, page_size: int = PAGE_SIZE):
     start = page * page_size
     page_items = items[start:start + page_size]
@@ -123,6 +114,7 @@ class PaginatedStringSelect(discord.ui.Select):
         else:
             setattr(view, self.name, chosen)
         await view.maybe_generate(interaction)
+
 
 class PageButton(discord.ui.Button):
     def __init__(self, label: str, target: str, delta: int):
@@ -221,16 +213,22 @@ class AddressView(discord.ui.View):
         except Exception:
             pass
 
+        # NOTE
         # Prepare generator kwargs, with defensive casting where appropriate
         gen_kwargs = {
-            "glyphtable": self.glyphtable,
-            "cmap": self.color,
+            "glyphs": self.glyphtable,
+            "colors": self.color,
             "seed": self.params.get("seed"),
+            "seed_prefix": self.params.get('seed_prefix'),
+            "seed_length": self.params.get('seed_length'),
+            'n': self.params.get('n'),
             "rows": int(self.params.get("rows")) if self.params.get("rows") is not None else None,
             "cols": int(self.params.get("cols")) if self.params.get("cols") is not None else None,
-            "passed_uuid": self.params.get("passed_uuid"),       # note: avoid 'uuid' name
-            "shorten_uuid": int(self.params.get("shorten_uuid")) if self.params.get("shorten_uuid") is not None else None,
-            "fsize": self.params.get("fsize"),
+            'mode': 'both',
+            'font_size': self.params.get('font_size'),
+            'font_colors': self.params.get('font_colors'),
+            'small_default': self.params.get('small_default'),
+            'small_color': self.params.get('small_color'),
             "glyph_values": self.params.get("glyph_values"),
             "color_values": self.params.get("color_values"),
         }
@@ -241,7 +239,7 @@ class AddressView(discord.ui.View):
         loop = asyncio.get_running_loop()
         out_path = None
         try:
-            gen_func = functools.partial(to_terminal.generate_glyph_png, **gen_kwargs)
+            gen_func = functools.partial(AH.__call__, **gen_kwargs)
             out_path = await loop.run_in_executor(None, gen_func)
 
             if out_path is None:
@@ -249,7 +247,7 @@ class AddressView(discord.ui.View):
                 tmp.close()
                 gen_kwargs_with_out = dict(gen_kwargs)
                 gen_kwargs_with_out["out_path"] = tmp.name
-                out_path = await loop.run_in_executor(None, functools.partial(to_terminal.generate_glyph_png, **gen_kwargs_with_out))
+                out_path = await loop.run_in_executor(None, functools.partial(AH.__call__, **gen_kwargs_with_out))
 
                 if out_path is None:
                     raise RuntimeError("Generator did not return an output path.")
@@ -291,28 +289,38 @@ async def uuid_command(interaction: discord.Interaction):
         except Exception:
             pass
 
-
-
-@TREE.command(name="address", description="Open the glyph generation UI")
+# ---------- Slash command (application command) ----------
+@TREE.command(name="address", description="Open the address generation UI")
 @app_commands.describe(
     seed="Optional seed string for deterministic generation",
-    rows="Number of rows in the glyph address (default 2)",
-    cols="Number of columns in the glyph address (default 8)",
-    uuid="Optional UUID string to use instead of generating a new one",
-    shorten_uuid="If set, shortens the UUID to this many characters",
-    fsize="Font size for rendering (optional)",
-    glyph_values="Custom glyph values (optional)",
-    color_values="Custom color values (optional)"
+    seed_prefix="Prefix the seed with text",
+    seed_length="Trim the seed by n length",
+    rows="Number of rows to generate in address",
+    cols="Number of columns to generate in address",
+    glyph_values="Custom glyph values (int) (optional) separated by comma",
+    color_values="Custom color values (int) (optional) separated by comma",
+    n="Gradient Resolution Size",
+    #mode="" # always png
+    font_size="Main font size of glyphs",
+    font_colors="Main font colors of glyphs, 'black', 'white', 'auto', or 'inverted'; Default is 'auto'",
+    small_default="Enable the small default if glyph values are specified",
+    small_size="Smaller font size of small default"
 )
-async def address(interaction: discord.Interaction,
-                  seed: Optional[str] = None,
-                  rows: Optional[int] = 2,
-                  cols: Optional[int] = 8,
-                  uuid: Optional[str] = None,
-                  shorten_uuid: Optional[int] = None,   # <-- changed to int per your note
-                  fsize: Optional[int] = None,
-                  glyph_values: Optional[str] = None,
-                  color_values: Optional[str] = None):
+async def address(
+        interaction: discord.Interaction,
+        seed: Optional[str] = None,
+        seed_prefix: Optional[str] = None,
+        seed_length: Optional[int] = None,
+        rows: Optional[int] = 1,
+        cols: Optional[int] = 9,
+        glyph_values: Optional[list] = None,
+        color_values: Optional[list] = None,
+        n: Optional[int] = None,
+        font_size: Optional[int] = 26,
+        font_colors: Optional[str] = 'auto',
+        small_default: Optional[bool] = True,
+        small_size: Optional[int] = 16,
+    ):
     # ensure we have at least one option available per select (or else inform the user)
     missing = []
     if not GLYPH_ALL:
@@ -325,17 +333,20 @@ async def address(interaction: discord.Interaction,
             ephemeral=True
         )
         return
-
-    # Map the incoming 'uuid' param to 'passed_uuid' used by generator to avoid shadowing uuid module
+    
     params = {
-        "seed": seed,
-        "rows": rows,
-        "cols": cols,
-        "passed_uuid": uuid,
-        "shorten_uuid": shorten_uuid,
-        "fsize": fsize,
-        "glyph_values": glyph_values,
-        "color_values": color_values,
+        'seed': seed,
+        'seed_prefix': seed_prefix,
+        'seed_length': seed_length,
+        'rows': rows,
+        'cols': cols,
+        'glyph_values': glyph_values,
+        'color_values': color_values,
+        'n': n,
+        'fsize': font_size,
+        'font_colors': font_colors,
+        'small_default': small_default,
+        'small_size': small_size,
     }
 
     view = AddressView(interaction.user, params, timeout=180.0)
