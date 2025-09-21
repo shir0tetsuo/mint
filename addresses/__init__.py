@@ -225,11 +225,11 @@ class Helpers:
     def _reset_color():
         return "\033[0m"
     
-    @staticmethod
-    def _new_seed():
+    def _new_seed(self):
         '''Generates a new random seed.'''
         seed=str(uuid.uuid4())
-        print('New seed: '+str(seed))
+        if hasattr(self, 'print_on_new_seed') and self.print_on_new_seed:
+            print('New seed: '+str(seed))
         return seed
 
     @staticmethod
@@ -345,13 +345,15 @@ class AddressHandler(Helpers):
             self, 
             base_directory=os.getcwd(), 
             glyph_subfolder='glyphtables', 
-            color_subfolder='colors'
+            color_subfolder='colors',
+            print_on_new_seed:bool=True
         ):
 
         self.glyphs = Glyphs(base_directory, subfolder=glyph_subfolder)
         self.colors = Colors(base_directory, subfolder=color_subfolder)
         
         self.lock = threading.RLock()
+        self.print_on_new_seed = print_on_new_seed
     
     def table_from_seed(
             self,
