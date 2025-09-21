@@ -229,8 +229,8 @@ class AddressView(discord.ui.View):
             'font_colors': self.params.get('font_colors'),
             'small_default': self.params.get('small_default'),
             'small_color': self.params.get('small_color'),
-            "glyph_values": self.params.get("glyph_values"),
-            "color_values": self.params.get("color_values"),
+            "glyph_values": self.params.get("glyph_values"),#.split(','),
+            "color_values": self.params.get("color_values"),#.split(','),
         }
 
         # prune None values to avoid shadowing modules or passing accidental None
@@ -313,8 +313,8 @@ async def address(
         seed_length: Optional[int] = None,
         rows: Optional[int] = 1,
         cols: Optional[int] = 9,
-        glyph_values: Optional[list] = None,
-        color_values: Optional[list] = None,
+        glyph_values: Optional[str] = None,
+        color_values: Optional[str] = None,
         n: Optional[int] = None,
         font_size: Optional[int] = 26,
         font_colors: Optional[str] = 'auto',

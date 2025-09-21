@@ -621,6 +621,23 @@ class AddressHandler(Helpers):
 
         # Validate inputs
 
+        def to_int(v):
+            try:
+                return int(v)
+            except Exception:
+                return None
+
+        def safe_value_convert(vals):
+            if isinstance(vals, str):
+                vals = vals.split(',')
+                vals = [to_int(v) for v in vals]
+                return vals
+            else:
+                return vals
+        
+        glyph_values = safe_value_convert(glyph_values)
+        color_values = safe_value_convert(color_values)
+
         seed = seed or self._new_seed()
         glyphs = glyphs if glyphs in self.glyphs.maps else 'Math1'
         colors = colors if colors in self.colors.maps else 'Beachgold'
