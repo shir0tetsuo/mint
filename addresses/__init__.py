@@ -522,6 +522,67 @@ class AddressHandler(Helpers):
 
             *args, **kwargs
         ):
+        """
+        Generate a deterministic grid of glyphs/colors and optionally render to terminal and/or PNG.
+
+        The generation is deterministic when `seed` is provided; otherwise a UUID seed is created
+        and printed. Uses `table_from_seed()` to build a lookup table of glyph/color pairs.
+
+        :param seed: Deterministic seed string (UUID-like). If ``None``, a new UUID is generated.
+        :type seed: Optional[str]
+        :param seed_prefix: Prefix added to the printed/output identifier (default ``'PTR-'``).
+        :type seed_prefix: str
+        :param seed_length: If provided, truncate the seed to this length for the output id.
+        :type seed_length: Optional[int]
+        :param cols: Number of columns in the grid.
+        :type cols: int
+        :param rows: Number of rows in the grid.
+        :type rows: int
+        :param glyphs: Key in ``Glyphs.maps`` selecting the glyph set (falls back to ``'Math1'``).
+        :type glyphs: str
+        :param colors: Key in ``Colors.maps`` selecting the colormap (falls back to ``'Beachgold'``).
+        :type colors: str
+        :param glyph_values: Optional per-cell glyph selectors. Integers use modulo indexing; other
+                            values are treated as keys when present in the table.
+        :type glyph_values: Optional[list]
+        :param color_values: Optional per-cell color selectors; semantics like ``glyph_values``.
+        :type color_values: Optional[list]
+        :param n: Controls color gradient resolution (passed to ``Colors.colormap``). When ``None``
+                it uses the colormap length.
+        :type n: Optional[int]
+        :param mode: Output mode: ``'terminal'``, ``'png'``, ``'both'`` or ``'none'``.
+        :type mode: Literal['terminal','png','both','none']
+        :param png_path: Path to save PNG (defaults to ``seed + ".png"`` when PNG mode used).
+        :type png_path: Optional[str]
+        :param font_size: Font size for main glyphs; if ``None`` uses glyph table configured size.
+        :type font_size: int
+        :param font_colors: Foreground selection: ``'black'``, ``'white'``, ``'auto'`` (WCAG), or
+                            ``'inverted'`` (invert bg color).
+        :type font_colors: Literal['black','white','auto','inverted']
+        :param small_default: If True, render the default glyph in the corner when different.
+        :type small_default: bool
+        :param small_size: Font size for the small default glyph (defaults to ~half main size).
+        :type small_size: int
+        :param small_color: Hex color for the small glyph; when ``None`` it uses inverted cell color.
+        :type small_color: Optional[str]
+        :param dpi: DPI used when rendering PNG.
+        :type dpi: int
+        :param lower_or_upper: Force output identifier case; ``'lower'`` or ``'upper'``.
+        :type lower_or_upper: Optional[Literal['lower','upper']]
+        :param \*args: Forward-compatible positional args (unused).
+        :param \*\*kwargs: Forward-compatible keyword args (unused).
+
+        :returns: If ``mode == 'none'`` returns the generated table (dict mapping index -> cell dict).
+                Otherwise returns the PNG path string (``png_path``).
+        :rtype: Union[dict, str]
+
+        :raises ValueError: If no glyphs or no colors are available, or invalid color/hex lengths.
+        :raises TypeError: If malformed types are provided for colors/glyphs.
+        :raises OSError: If font files are missing or matplotlib raises on font load/save.
+
+        :note: PNG saving is protected by an RLock (`self.lock`) to avoid concurrent writes.
+        :note: ``font_colors='auto'`` uses WCAG relative-luminance to choose black or white.
+        """
 
         # Validate inputs
 
