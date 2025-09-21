@@ -7,7 +7,7 @@ import uuid
 import threading
 import numpy as np
 import random
-from typing import Optional, Any, Literal, Sequence, Union
+from typing import Optional, Any, Literal, Sequence, Union, Tuple
 import numbers
 
 def read_file_as_list(file_path):
@@ -99,7 +99,7 @@ class Glyphs(PathMap):
 
 class Helpers:
     @staticmethod
-    def invert_hex_color(hex_color: str, keep_hash: bool = True) -> str:
+    def _invert_hex_color(hex_color: str, keep_hash: bool = True) -> str:
         """
         Invert an RGB hex color (opposite values: 255 - component).
         Accepts:
@@ -232,6 +232,113 @@ class Helpers:
         print('New seed: '+str(seed))
         return seed
 
+    @staticmethod
+    def _choose_black_or_white(
+        bg_color: Union[str, Sequence],
+        return_format: str = "hex"
+    ) -> Union[str, Tuple[int,int,int]]:
+        """
+        Decide whether black or white text has better contrast on the given background color.
+
+        Parameters:
+        bg_color: hex string like '#123456' or 'fff', or a sequence (r,g,b) with ints (0..255)
+                    or floats (0..1). Alpha is ignored if provided.
+        return_format: 'hex' (default) -> '#000000' or '#ffffff'
+                        'name' -> 'black' or 'white'
+                        'rgb'  -> (r,g,b) tuple ints
+
+        Uses WCAG relative luminance + contrast ratio to pick the color with higher contrast.
+        """
+        if return_format not in ("hex", "name", "rgb"):
+            raise ValueError("return_format must be 'hex', 'name' or 'rgb'")
+        
+        def _relative_luminance(r: int, g: int, b: int) -> float:
+            """
+            Compute relative luminance (0..1) from integer RGB 0..255 using WCAG formula.
+            """
+            def _srgb_channel_to_linear(c: float) -> float:
+                """
+                Convert sRGB channel (0..1) to linear-light value per WCAG.
+                c is in 0..1
+                """
+                if c <= 0.03928:
+                    return c / 12.92
+                return ((c + 0.055) / 1.055) ** 2.4
+            rs = r / 255.0
+            gs = g / 255.0
+            bs = b / 255.0
+            r_lin = _srgb_channel_to_linear(rs)
+            g_lin = _srgb_channel_to_linear(gs)
+            b_lin = _srgb_channel_to_linear(bs)
+            return 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+
+        
+        def _parse_color_to_rgb255(color: Union[str, Sequence]) -> Tuple[int, int, int]:
+            """Return (r,g,b) ints in 0..255 from hex string or sequence of numbers."""
+            # hex string cases
+            if isinstance(color, str):
+                s = color.strip()
+                if s.startswith('#'):
+                    s = s[1:]
+                s = s.lower()
+                if len(s) in (3, 4):  # short form: rgb or rgba
+                    s = ''.join(ch*2 for ch in s)
+                if len(s) not in (6, 8):
+                    raise ValueError(f"Invalid hex color length: {color!r}")
+                try:
+                    # parse rgb part, ignore alpha if present
+                    r = int(s[0:2], 16)
+                    g = int(s[2:4], 16)
+                    b = int(s[4:6], 16)
+                except ValueError:
+                    raise ValueError(f"Invalid hex color: {color!r}")
+                return r, g, b
+
+            # sequence (list/tuple/numpy array-like)
+            if hasattr(color, "tolist"):
+                color = color.tolist()
+            if isinstance(color, (list, tuple)):
+                if len(color) < 3:
+                    raise ValueError("Color sequence must have at least 3 components")
+                comps = color[:3]
+                out = []
+                for v in comps:
+                    if not isinstance(v, numbers.Real):
+                        raise TypeError(f"Color component must be numeric, got {type(v)}")
+                    # floats in 0..1 -> scale; ints assumed 0..255
+                    if isinstance(v, float) or (abs(v) <= 1 and not isinstance(v, int)):
+                        fv = float(v)
+                        if 0.0 <= fv <= 1.0:
+                            bv = int(round(fv * 255))
+                        else:
+                            bv = int(round(fv))
+                    else:
+                        bv = int(round(v))
+                    # clamp
+                    if bv < 0:
+                        bv = 0
+                    elif bv > 255:
+                        bv = 255
+                    out.append(bv)
+                return tuple(out)
+
+            raise TypeError(f"Unsupported color type: {type(color)}")
+
+        r, g, b = _parse_color_to_rgb255(bg_color)
+        L = _relative_luminance(r, g, b)
+
+        # Contrast with black (L_black = 0) => (L + 0.05) / 0.05
+        contrast_with_black = (L + 0.05) / 0.05
+        # Contrast with white (L_white = 1) => (1 + 0.05) / (L + 0.05)
+        contrast_with_white = (1.05) / (L + 0.05)
+
+        use_white = contrast_with_white >= contrast_with_black
+
+        if return_format == "hex":
+            return "#ffffff" if use_white else "#000000"
+        if return_format == "name":
+            return "white" if use_white else "black"
+        return (255, 255, 255) if use_white else (0, 0, 0)
 
 class AddressHandler(Helpers):
     def __init__(
@@ -382,6 +489,8 @@ class AddressHandler(Helpers):
 
         return out
     
+    # TODO : Markdown output
+    # TODO : HTML output
     def __call__(
             self, 
             
@@ -402,9 +511,12 @@ class AddressHandler(Helpers):
             mode:Literal['terminal', 'png', 'both', 'none']='terminal',
             png_path:Optional[str]=None,
             font_size:int=26,
+            font_colors:Literal['black', 'white', 'auto', 'inverted']='auto',
+            
             small_default:bool=False,
             small_size:int=12,
             small_color:Optional[str]=None, # None = inverted
+
             dpi:int=300,
             lower_or_upper:Optional[Literal['lower', 'upper']]=None,
 
@@ -457,11 +569,16 @@ class AddressHandler(Helpers):
                 for j in range(cols):
                     symbol = table[i*cols + j]['glyph']
                     color = table[i*cols + j]['color']
+                    symbol_color = (
+                        self._invert_hex_color(color) if font_colors == 'inverted'
+                        else self._choose_black_or_white(color) if font_colors == 'auto'
+                        else font_colors
+                        )
                     
                     # small_default
                     default_symbol = table[i*cols + j]['default_glyph']
                     #default_color = table[i*cols + j]['default_color']
-                    _small_color = small_color or self.invert_hex_color(color)
+                    _small_color = small_color or self._invert_hex_color(color)
                     
                     rect = mpatches.Rectangle(
                         (j, rows-i-0.5), 
@@ -476,7 +593,7 @@ class AddressHandler(Helpers):
                         symbol, 
                         ha='center', 
                         va='center', 
-                        color='black', 
+                        color=symbol_color, 
                         fontsize=font_size, 
                         fontproperties=font_properties
                     )
@@ -498,7 +615,7 @@ class AddressHandler(Helpers):
             ax.text(
                 cols/2, 
                 0.15, 
-                seed,#(seed if seed_length is None else seed[:seed_length]) if not seed_prefix else f"{seed_prefix}{(seed if seed_length is None else seed[:seed_length])}", 
+                output_ident,
                 ha='center', 
                 va='center', 
                 fontsize=16, 
