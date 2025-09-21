@@ -1,8 +1,10 @@
 import os
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
 import uuid
+import threading
 import numpy as np
 import random
 from typing import Optional, Any
@@ -105,6 +107,8 @@ class AddressHandler:
 
         self.glyphs = Glyphs(base_directory, subfolder=glyph_subfolder)
         self.colors = Colors(base_directory, subfolder=color_subfolder)
+
+        self.lock = threading.RLock()
 
     def _rgba_to_hex(self, col):
         """Accepts (r,g,b) or (r,g,b,a) with floats in 0..1 or ints in 0..255.
@@ -294,6 +298,63 @@ class AddressHandler:
 
         return out
     
+    def to_png(
+            self, 
+            seed:Optional[str]=None, 
+            cols:int=9, 
+            rows:int=1,
+            glyphs:str='Math1', 
+            colors:str='Beachgold',
+            glyph_values:Optional[list[int|Any]]=None,
+            color_values:Optional[list[int|Any]]=None,
+            n:Optional[int]=None, # Impacts color gradient resolution
+            png_path:Optional[str]=None,
+            table:Optional[dict]=None,
+            font_size:int=26,
+            dpi:int=300
+        ):
+
+        seed = seed or self.new_seed()
+
+        if font_size is None:
+            font_size = self.glyphs.maps.get(glyphs)[2] or 26
+
+        table = table or self.build(
+            seed=seed, 
+            cols=cols, 
+            rows=rows,
+            glyphs=glyphs, 
+            colors=colors,
+            glyph_values=glyph_values,
+            color_values=color_values,
+            n=n
+        )
+
+        font_path = os.path.join(self.glyphs.fontdir, self.glyphs.maps.get(glyphs)[1])
+        png_path = png_path or seed+".png"
+        
+        fig, ax = plt.subplots(figsize=(cols, rows+1), dpi=dpi)
+        fig.patch.set_alpha(0)
+        ax.set_xlim(0, cols)
+        ax.set_ylim(0, rows+1)
+        ax.axis('off')
+        ax.set_facecolor('none')
+        font_properties = fm.FontProperties(fname=font_path) if font_path else None
+        
+        for i in range(rows):
+            for j in range(cols):
+                symbol = table[i*cols + j]['glyph']
+                color = table[i*cols + j]['color']
+                rect = mpatches.Rectangle((j, rows-i-0.5), 1, 1, color=color)
+                ax.add_patch(rect)
+                ax.text(j+0.5, rows-i, symbol, ha='center', va='center', color='black', fontsize=font_size, fontproperties=font_properties)
+
+        ax.text(cols/2, 0.15, seed, ha='center', va='center', fontsize=16, color='gray')
+        with self.lock:
+            plt.savefig(png_path, bbox_inches='tight', dpi=dpi, transparent=True)
+        plt.close(fig)
+        return png_path
+    
     def to_terminal(
             self, 
             seed:Optional[str]=None, 
@@ -303,7 +364,11 @@ class AddressHandler:
             colors:str='Beachgold',
             glyph_values:Optional[list[int|Any]]=None,
             color_values:Optional[list[int|Any]]=None,
-            n:Optional[int]=None # Impacts color gradient resolution
+            n:Optional[int]=None, # Impacts color gradient resolution
+            export_png:bool=False,
+            png_path:Optional[str]=None,
+            font_size:int=26,
+            dpi:int=300
         ):
 
         table = self.build(
@@ -316,6 +381,24 @@ class AddressHandler:
             color_values=color_values,
             n=n
         )
+
+        if export_png:
+            self.to_png(
+                seed=seed, 
+                cols=cols, 
+                rows=rows,
+                glyphs=glyphs, 
+                colors=colors,
+                glyph_values=glyph_values,
+                color_values=color_values,
+                n=n,
+                png_path=png_path,
+                table=table,
+                font_size=font_size,
+                dpi=dpi
+            )
+
+        # Get terminal output
 
         lines = []
         current_row = []
