@@ -110,20 +110,20 @@ class AddressHandler:
 
         self.lock = threading.RLock()
 
-    def _rgba_to_hex(self, col):
+    def _rgba_to_hex(self, rgba):
         """Accepts (r,g,b) or (r,g,b,a) with floats in 0..1 or ints in 0..255.
         Returns '#rrggbb' (alpha ignored)."""
         # handle numpy arrays or similar
-        if hasattr(col, "tolist"):
-            col = col.tolist()
+        if hasattr(rgba, "tolist"):
+            rgba = rgba.tolist()
 
-        if not isinstance(col, (tuple, list)):
-            raise TypeError(f"Unsupported color type: {type(col)}")
+        if not isinstance(rgba, (tuple, list)):
+            raise TypeError(f"Unsupported color type: {type(rgba)}")
 
         # Extract r,g,b (ignore alpha if present)
-        if len(col) < 3:
-            raise ValueError(f"Color must have at least 3 components: {col!r}")
-        r, g, b = col[0], col[1], col[2]
+        if len(rgba) < 3:
+            raise ValueError(f"Color must have at least 3 components: {rgba!r}")
+        r, g, b = rgba[0], rgba[1], rgba[2]
 
         def to_byte(v):
             # floats in [0,1] -> byte; ints assumed 0..255
@@ -131,8 +131,8 @@ class AddressHandler:
                 return int(round(v * 255))
             return int(round(v))
 
-        r_b, g_b, b_b = map(to_byte, (r, g, b))
-        return "#{:02x}{:02x}{:02x}".format(r_b, g_b, b_b)
+        r_x, g_x, b_x = map(to_byte, (r, g, b))
+        return "#{:02x}{:02x}{:02x}".format(r_x, g_x, b_x)
 
     def _normalize_hex(self, s):
         """Normalize hex like '#abc' or 'abc' or '#aabbcc' -> '#aabbcc' (lowercase)."""
