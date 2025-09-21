@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.colors as mcolors
 import uuid
+import numpy as np
 import random
 from typing import Optional, Any
 import string
@@ -140,9 +141,22 @@ class AddressHandler:
             raise ValueError(f"Invalid hex color: {s!r}")
         return "#" + s.lower()
 
+    # ANSI color helpers for terminal output
+    def ansi_color(self, rgb):
+        """Return ANSI escape code for background color from hex string."""
+        if rgb.startswith('#'):
+            rgb = rgb[1:]
+        r, g, b = int(rgb[0:2],16), int(rgb[2:4],16), int(rgb[4:6],16)
+        return f"\033[48;2;{r};{g};{b}m"
+
+    def reset_color(self):
+        return "\033[0m"
+
     def new_seed(self):
         '''Generates a new random seed.'''
-        return str(uuid.uuid4())
+        seed=str(uuid.uuid4())
+        print('New seed: '+str(seed))
+        return seed
     
     def table_from_seed(
             self,
@@ -179,7 +193,6 @@ class AddressHandler:
         # Seed handling — ensure deterministic output
         if seed is None:
             seed = self.new_seed()
-            print('New Table Seed:', seed)
         random.seed(seed)
 
         # Deterministic selection + padding by cycling if necessary
@@ -229,8 +242,7 @@ class AddressHandler:
             colors:str='Beachgold',
             glyph_values:Optional[list[int|Any]]=None,
             color_values:Optional[list[int|Any]]=None,
-            n:Optional[int]=None, # Impacts color gradient resolution
-            *args, **kwds
+            n:Optional[int]=None # Impacts color gradient resolution
         ):
 
         if glyph_values:
@@ -246,7 +258,6 @@ class AddressHandler:
         # Seed handling — ensure deterministic output
         if seed is None:
             seed = self.new_seed()
-            print('New Table Seed:', seed)
 
         table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n)
 
@@ -282,3 +293,47 @@ class AddressHandler:
             out[idx]['color'] = table[key]['color']
 
         return out
+    
+    def to_terminal(
+            self, 
+            seed:Optional[str]=None, 
+            cols:int=9, 
+            rows:int=1,
+            glyphs:str='Math1', 
+            colors:str='Beachgold',
+            glyph_values:Optional[list[int|Any]]=None,
+            color_values:Optional[list[int|Any]]=None,
+            n:Optional[int]=None # Impacts color gradient resolution
+        ):
+
+        table = self.build(
+            seed=seed, 
+            cols=cols, 
+            rows=rows,
+            glyphs=glyphs, 
+            colors=colors,
+            glyph_values=glyph_values,
+            color_values=color_values,
+            n=n
+        )
+
+        lines = []
+        current_row = []
+
+        for idx, gt in enumerate(table.values()):
+            cell = self.ansi_color(gt['color']) + f" {gt['glyph']} " + self.reset_color()
+            current_row.append(cell)
+
+            # End of row
+            if (idx + 1) % cols == 0:
+                lines.append("".join(current_row))
+                current_row = []
+
+        # If the last row isn’t full (edge case)
+        if current_row:
+            lines.append("".join(current_row))
+
+        for line in lines:
+            print(line)
+
+        return
