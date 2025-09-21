@@ -1,1 +1,2 @@
 matplotlib==3.10.6
+discord==2.3.2
