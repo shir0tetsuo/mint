@@ -6,9 +6,12 @@ import matplotlib.colors as mcolors
 import uuid
 import threading
 import numpy as np
+import json
 import random
 from typing import Optional, Any, Literal, Sequence, Union, Tuple
 import numbers
+import inspect
+from PIL import Image, PngImagePlugin
 
 def read_file_as_list(file_path):
     '''Returns list of lines from file (UTF-8).'''
@@ -98,6 +101,32 @@ class Glyphs(PathMap):
         }
 
 class Helpers:
+    @staticmethod
+    def _collect_args(include_self:bool=False):
+        """Utility: Collect all arguments of the caller as a dict."""
+        frame = inspect.currentframe().f_back
+        args, varargs, varkw, values = inspect.getargvalues(frame)
+        if include_self:
+            collected = {name: values[name] for name in args} # normal + defaults
+        else:
+            collected = {name: values[name] for name in args if name != "self"}
+        if varargs:
+            collected[varargs] = values[varargs]           # *args
+        if varkw:
+            collected.update(values[varkw])                # **kwargs
+        return collected
+    
+    def _read_png_meta(self, png_path, restore=True):
+        if hasattr(self, 'lock'):
+            with self.lock:
+                img = Image.open(png_path)
+        else:
+            img = Image.open(png_path)
+
+        data = img.info.get('json_metadata')
+
+        return (json.loads(data) if restore else data)
+
     @staticmethod
     def _invert_hex_color(hex_color: str, keep_hash: bool = True) -> str:
         """
@@ -522,6 +551,8 @@ class AddressHandler(Helpers):
             dpi:int=300,
             lower_or_upper:Optional[Literal['lower', 'upper']]=None,
 
+            embed_json_data:bool=True,
+
             *args, **kwargs
         ):
         """
@@ -586,6 +617,8 @@ class AddressHandler(Helpers):
         :note: ``font_colors='auto'`` uses WCAG relative-luminance to choose black or white.
         """
 
+        _args = self._collect_args()
+
         # Validate inputs
 
         seed = seed or self._new_seed()
@@ -636,7 +669,7 @@ class AddressHandler(Helpers):
                         self._invert_hex_color(color) if font_colors == 'inverted'
                         else self._choose_black_or_white(color) if font_colors == 'auto'
                         else font_colors
-                        )
+                    )
                     
                     # small_default
                     default_symbol = table[i*cols + j]['default_glyph']
@@ -687,6 +720,16 @@ class AddressHandler(Helpers):
             
             with self.lock:
                 plt.savefig(png_path, bbox_inches='tight', dpi=dpi, transparent=True)
+            
+            # Encode the arguments
+            if embed_json_data:
+                with self.lock:
+                    img=Image.open(png_path)
+                meta = PngImagePlugin.PngInfo()
+                meta.add_text('json_metadata', json.dumps(_args))
+                with self.lock:
+                    img.save(png_path, pnginfo=meta)
+
             plt.close(fig)
 
         # Get terminal output
