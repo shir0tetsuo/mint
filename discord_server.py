@@ -231,6 +231,7 @@ class AddressView(discord.ui.View):
             'small_color': self.params.get('small_color'),
             "glyph_values": self.params.get("glyph_values"),#.split(','),
             "color_values": self.params.get("color_values"),#.split(','),
+            "d_weight_thresh": self.params.get("d_weight_thresh")
         }
 
         # prune None values to avoid shadowing modules or passing accidental None
@@ -300,6 +301,7 @@ async def uuid_command(interaction: discord.Interaction):
     glyph_values="Custom glyph values (int) (optional) separated by comma",
     color_values="Custom color values (int) (optional) separated by comma",
     n="Gradient Resolution Size",
+    d_weight_thresh="Threshold for inclusion of diacritics if available",
     #mode="" # always png
     font_size="Main font size of glyphs",
     font_colors="Main font colors of glyphs, 'black', 'white', 'auto', or 'inverted'; Default is 'auto'",
@@ -316,6 +318,7 @@ async def address(
         glyph_values: Optional[str] = None,
         color_values: Optional[str] = None,
         n: Optional[int] = None,
+        d_weight_thresh: Optional[float] = 0.5,
         font_size: Optional[int] = 26,
         font_colors: Optional[str] = 'auto',
         small_default: Optional[bool] = True,
@@ -343,6 +346,7 @@ async def address(
         'glyph_values': glyph_values,
         'color_values': color_values,
         'n': n,
+        'd_weight_thresh': d_weight_thresh,
         'fsize': font_size,
         'font_colors': font_colors,
         'small_default': small_default,
@@ -366,6 +370,11 @@ async def on_ready():
     log.info("Bot ready. Logged in as %s (%s)", bot.user, getattr(bot.user, "id", None))
     try:
         synced = await TREE.sync()
+        # Put the bot online 
+        await bot.change_presence(
+            status=discord.Status.online,
+            activity=discord.Game("with fire.") 
+        )
         log.info("Application commands synced. Count: %s", len(synced))
     except Exception:
         log.exception("Failed to sync application commands")

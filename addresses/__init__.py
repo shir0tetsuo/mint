@@ -13,6 +13,21 @@ import numbers
 import inspect
 from PIL import Image, PngImagePlugin
 
+def drop_trailing_integers(seq):
+    if isinstance(seq, str):
+        # Strip trailing digit characters
+        i = len(seq)
+        while i > 0 and seq[i-1].isdigit():
+            i -= 1
+        return seq[:i]
+    elif isinstance(seq, (list, tuple)):
+        i = len(seq)
+        while i > 0 and isinstance(seq[i-1], int):
+            i -= 1
+        return type(seq)(seq[:i])
+    else:
+        return seq
+
 def read_file_as_list(file_path):
     '''Returns list of lines from file (UTF-8).'''
     with open(file_path, 'r', encoding='UTF-8') as file:
@@ -90,15 +105,39 @@ class Glyphs(PathMap):
                 ]
             }
         '''
-        return {
+        data = {
             os.path.splitext(filename)[0]: [
                 filedata[1],                             # Glyphs
                 os.path.join(self.fontdir, filedata[0]), # Directory
                 int(filedata[2])                         # Font Size (Generative Iter)
             ]
             for filename in self.items
-            for filedata in [read_file_as_list(os.path.join(self.path, filename))]
+            for filedata in [
+                read_file_as_list(os.path.join(self.path, filename))
+            ]
         }
+
+        return data
+    
+
+class Diacritics(PathMap):
+
+    def __init__(self, base_directory, subfolder='diacritics'):
+        super().__init__(base_directory, subfolder)
+
+    @property
+    def maps(self) -> dict[str, list[str]]:
+        data = {
+            os.path.splitext(filename)[0]: [
+                filedata[0],                             # Diacritics for Glyphs
+            ]
+            for filename in self.items
+            for filedata in [
+                read_file_as_list(os.path.join(self.path, filename))
+            ]
+        }
+
+        return data
 
 class Helpers:
     @staticmethod
@@ -375,11 +414,13 @@ class AddressHandler(Helpers):
             base_directory=os.getcwd(), 
             glyph_subfolder='glyphtables', 
             color_subfolder='colors',
+            diacritics_subfolder='diacritics',
             print_on_new_seed:bool=True
         ):
 
         self.glyphs = Glyphs(base_directory, subfolder=glyph_subfolder)
         self.colors = Colors(base_directory, subfolder=color_subfolder)
+        self.diacritics = Diacritics(base_directory, subfolder=diacritics_subfolder)
         
         self.lock = threading.RLock()
         self.print_on_new_seed = print_on_new_seed
@@ -389,12 +430,17 @@ class AddressHandler(Helpers):
             seed: Optional[str] = None,
             glyphs: str = 'Math1',
             colors: str = 'Beachgold',
-            n: Optional[int] = None
+            n: Optional[int] = None,
+            d_weight_thresh: float = 0.5
         ):
 
         # Validate inputs
-        glyphs = self.glyphs.maps.get(glyphs)[0] or self.glyphs.maps['Math1']
-
+        try:
+            diacritics = self.diacritics.maps.get(drop_trailing_integers(glyphs))[0]
+        except TypeError:
+            diacritics = None
+        glyphs = self.glyphs.maps.get(glyphs)[0] or self.glyphs.maps['Math1'][0]
+        
         if colors not in self.colors.maps:
             colors = 'Beachgold'
 
@@ -429,6 +475,16 @@ class AddressHandler(Helpers):
         seed_glyphs = random.sample(glyphs, k_glyphs)
         if len(seed_glyphs) < n:
             seed_glyphs = list(itertools.islice(itertools.cycle(seed_glyphs), n))
+
+        # Add diacritics
+        if diacritics is not None:
+            diacritic_weights = [random.random() for _ in range(n)]
+            print(diacritic_weights)
+            for index, weight in list(enumerate(diacritic_weights)):
+                if d_weight_thresh > weight:
+                    before = seed_glyphs[index]
+                    seed_glyphs[index] = seed_glyphs[index] + random.choice(diacritics)
+                    print(f'Grapheme "{seed_glyphs[index]}" from "{before}" ({d_weight_thresh}>{weight})')
 
         # colors: pick up to n unique; if fewer, take all (shuffled) then cycle to n
         k_colors = min(n, len(color_list))
@@ -468,7 +524,8 @@ class AddressHandler(Helpers):
             colors:str='Beachgold',
             glyph_values:Optional[list[int|Any]]=None,
             color_values:Optional[list[int|Any]]=None,
-            n:Optional[int]=None # Impacts color gradient resolution
+            n:Optional[int]=None, # Impacts color gradient resolution
+            d_weight_thresh:float=0.5
         ):
 
         if glyph_values:
@@ -485,7 +542,7 @@ class AddressHandler(Helpers):
         if seed is None:
             seed = self._new_seed()
 
-        table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n)
+        table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n, d_weight_thresh=d_weight_thresh)
 
         defaults = [random.choice(list(table.keys())) for _ in range(cols*rows)]
 
@@ -538,6 +595,7 @@ class AddressHandler(Helpers):
             glyph_values:Optional[list[int|Any]]=None,
             color_values:Optional[list[int|Any]]=None,
             n:Optional[int]=None, # Impacts color gradient resolution
+            d_weight_thresh:float = 0.5,
             
             mode:Literal['terminal', 'png', 'both', 'none']='terminal',
             png_path:Optional[str]=None,
@@ -602,8 +660,8 @@ class AddressHandler(Helpers):
         :type dpi: int
         :param lower_or_upper: Force output identifier case; ``'lower'`` or ``'upper'``.
         :type lower_or_upper: Optional[Literal['lower','upper']]
-        :param \*args: Forward-compatible positional args (unused).
-        :param \*\*kwargs: Forward-compatible keyword args (unused).
+        :param args: Forward-compatible positional args (unused).
+        :param kwargs: Forward-compatible keyword args (unused).
 
         :returns: If ``mode == 'none'`` returns the generated table (dict mapping index -> cell dict).
                 Otherwise returns the PNG path string (``png_path``).
@@ -662,7 +720,8 @@ class AddressHandler(Helpers):
             colors=colors,
             glyph_values=glyph_values,
             color_values=color_values,
-            n=n
+            n=n,
+            d_weight_thresh=d_weight_thresh
         )
 
         if mode in ['none', None]:
