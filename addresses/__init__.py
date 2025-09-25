@@ -431,7 +431,8 @@ class AddressHandler(Helpers):
             glyphs: str = 'Math1',
             colors: str = 'Beachgold',
             n: Optional[int] = None,
-            d_weight_thresh: float = 0.5
+            d_weight_thresh: float = 0.5,
+            d_left_of_string: bool = False
         ):
 
         # Validate inputs
@@ -483,7 +484,10 @@ class AddressHandler(Helpers):
             for index, weight in list(enumerate(diacritic_weights)):
                 if d_weight_thresh > weight:
                     before = seed_glyphs[index]
-                    seed_glyphs[index] = seed_glyphs[index] + random.choice(diacritics)
+                    if d_left_of_string:
+                        seed_glyphs[index] = random.choice(diacritics) + seed_glyphs[index]
+                    else:
+                        seed_glyphs[index] = seed_glyphs[index] + random.choice(diacritics)
                     print(f'Grapheme "{seed_glyphs[index]}" from "{before}" ({d_weight_thresh}>{weight})')
 
         # colors: pick up to n unique; if fewer, take all (shuffled) then cycle to n
@@ -525,7 +529,8 @@ class AddressHandler(Helpers):
             glyph_values:Optional[list[int|Any]]=None,
             color_values:Optional[list[int|Any]]=None,
             n:Optional[int]=None, # Impacts color gradient resolution
-            d_weight_thresh:float=0.5
+            d_weight_thresh:float=0.5,
+            d_left_of_string: bool = False
         ):
 
         if glyph_values:
@@ -542,7 +547,7 @@ class AddressHandler(Helpers):
         if seed is None:
             seed = self._new_seed()
 
-        table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n, d_weight_thresh=d_weight_thresh)
+        table = self.table_from_seed(seed=seed, glyphs=glyphs, colors=colors, n=n, d_weight_thresh=d_weight_thresh, d_left_of_string=d_left_of_string)
 
         defaults = [random.choice(list(table.keys())) for _ in range(cols*rows)]
 
@@ -596,6 +601,7 @@ class AddressHandler(Helpers):
             color_values:Optional[list[int|Any]]=None,
             n:Optional[int]=None, # Impacts color gradient resolution
             d_weight_thresh:float = 0.5,
+            d_left_of_string: bool = False,
             
             mode:Literal['terminal', 'png', 'both', 'none']='terminal',
             png_path:Optional[str]=None,
@@ -721,7 +727,8 @@ class AddressHandler(Helpers):
             glyph_values=glyph_values,
             color_values=color_values,
             n=n,
-            d_weight_thresh=d_weight_thresh
+            d_weight_thresh=d_weight_thresh,
+            d_left_of_string=d_left_of_string
         )
 
         if mode in ['none', None]:

@@ -231,6 +231,7 @@ class AddressView(discord.ui.View):
             'small_color': self.params.get('small_color'),
             "glyph_values": self.params.get("glyph_values"),#.split(','),
             "color_values": self.params.get("color_values"),#.split(','),
+            'd_left_of_string': self.params.get("d_left_of_string"),
             "d_weight_thresh": self.params.get("d_weight_thresh")
         }
 
@@ -302,6 +303,7 @@ async def uuid_command(interaction: discord.Interaction):
     color_values="Custom color values (int) (optional) separated by comma",
     n="Gradient Resolution Size",
     d_weight_thresh="Threshold for inclusion of diacritics if available",
+    d_left_of_string="Shift the diacritics to the left side of the glyph when joining",
     #mode="" # always png
     font_size="Main font size of glyphs",
     font_colors="Main font colors of glyphs, 'black', 'white', 'auto', or 'inverted'; Default is 'auto'",
@@ -319,6 +321,7 @@ async def address(
         color_values: Optional[str] = None,
         n: Optional[int] = None,
         d_weight_thresh: Optional[float] = 0.5,
+        d_left_of_string: Optional[bool] = False,
         font_size: Optional[int] = 26,
         font_colors: Optional[str] = 'auto',
         small_default: Optional[bool] = True,
@@ -347,6 +350,7 @@ async def address(
         'color_values': color_values,
         'n': n,
         'd_weight_thresh': d_weight_thresh,
+        'd_left_of_string': d_left_of_string,
         'fsize': font_size,
         'font_colors': font_colors,
         'small_default': small_default,
