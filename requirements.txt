@@ -1,2 +1,6 @@
 matplotlib==3.10.6
 discord==2.3.2
+requests==2.32.5
+cryptography==46.0.3
+uvicorn==0.38.0
+fastapi==0.121.1

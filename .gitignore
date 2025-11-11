@@ -2,3 +2,4 @@ venv/
 output/
 *__pycache__/
 start_bot.sh
+PrivKey.json
