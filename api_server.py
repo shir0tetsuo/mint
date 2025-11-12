@@ -1,18 +1,16 @@
 import inspect
 import os
 import json
-
-import inspect
 import subprocess
-import uuid
 import threading
 import uuid
+import requests
 import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Any, Type, Tuple, Union, Optional, Dict, List, Literal, NewType
 
-from fastapi import FastAPI, Header, HTTPException, status, BackgroundTasks, Depends
+from fastapi import FastAPI, Request, Header, HTTPException, status, BackgroundTasks, Depends
 from fastapi.security import APIKeyHeader
 from uvicorn import run as uvicorn_run
 from pydantic import BaseModel, Field
@@ -21,9 +19,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 APIKey = NewType('APIKey', str)
 PermissionGroup = NewType('PermissionGroup', str)
 
-global_lock = threading.RLock()
-api_privkey = Path(os.path.join(Path(__file__).parent.resolve(), 'PrivKey.json'))
-PRIVKEY = None
+lock = threading.RLock()
+CASES, cases_file = None, Path(os.path.join(Path(__file__).parent.resolve(), 'cases.json'))
+PRIVKEY, api_privkey = None, Path(os.path.join(Path(__file__).parent.resolve(), 'PrivKey.json'))
 days_until_expiry = timedelta(days=30)
 #cache    : dict[APIKey, dict[str, Any]]     = {}
 apiserver = FastAPI(title="shadowsword.ca JSON Server")
@@ -36,6 +34,13 @@ class BaseResponse(BaseModel):
 class StatusResponse(BaseResponse):
     version: str
     user_permission_group: Optional[str] = None
+
+class CaseResponse(BaseResponse):
+    user_id: str
+    case_id: str
+    request: str
+    response: str
+    resolution_date: str
 
 def new_uuid():
     return str(uuid.uuid4())
@@ -50,10 +55,35 @@ def get_git_version():
     except Exception:
         return "unknown"
     
+def commit_cases():
+    global lock
+    global CASES
+    global cases_file
+    with lock:
+        with open(str(cases_file), 'w', encoding='utf-8') as cf:
+            json.dump(CASES, cf, indent=4)
+    return
+
+def cases():
+    global lock
+    global CASES
+    global cases_file
+    if not CASES:
+        try:
+            if cases_file.exists():
+                with lock:
+                    with cases_file.open('r', encoding='utf-8') as cf:
+                        CASES = json.load(cf)
+        except Exception as e:
+            message = f'Error while obtaining CASES: {str(e)}'
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+
+    return CASES or {}
+    
 def store_privkey(private_key:bytes=os.urandom(32)):
-    global global_lock
+    global lock
     global api_privkey
-    with global_lock:
+    with lock:
         with open(str(api_privkey), 'w', encoding='utf-8') as kf:
             json.dump({'privkey': base64.b64encode(private_key).decode('utf-8')}, kf, indent=4)
     print('A new private decryption key has been generated.')
@@ -61,20 +91,20 @@ def store_privkey(private_key:bytes=os.urandom(32)):
 
 def privkey():
     global PRIVKEY
-    global global_lock
+    global lock
     global api_privkey
     if not PRIVKEY:
         try:
             if not api_privkey.exists():
-                private_key = store_privkey()
-                PRIVKEY = private_key
+                PRIVKEY = store_privkey()
             else:
-                with global_lock:
+                with lock:
                     with api_privkey.open('r', encoding='utf-8') as kf:
                         data = json.load(kf)
                         PRIVKEY = base64.b64decode(data['privkey'])
-        except Exception:
-            raise
+        except Exception as e:
+            message = f'Error while obtaining PRIVATE KEY for decryption: {str(e)}'
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
     return PRIVKEY
 
 def create_api_key(
@@ -108,7 +138,6 @@ def decrypt_api_key(b64_cipher:APIKey):
     _ID = 'NO_ID'
 
     def _values(): 
-        print(f'Authorization Request: {_LABEL}:{_ID} with {_PERMISSION_GROUP} @ {_DAYS_OLD} Days: {_VALID_STRUCT}')
         return (_VALID_STRUCT, _LABEL, _PERMISSION_GROUP, _DAYS_OLD, _ID)
     
     try:
@@ -136,8 +165,9 @@ def Authorization(api_key: str = Depends(api_key_header)):
     valid_struct, label, permission_group, days, id = decrypt_api_key(api_key)
     if not valid_struct:
         message = "Unauthorized: Malformed API Key."
-        if days >= days_until_expiry.days:
-            message = f'Unauthorized API Key for {label}: Expired {days} days ago.'
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=message)
+    if days >= days_until_expiry.days:
+        message = f'Unauthorized API Key for {label}: Expired {days} days ago.'
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=message)
     
     return {
@@ -150,7 +180,6 @@ def Authorization(api_key: str = Depends(api_key_header)):
 ##############################################################
 @apiserver.get("/status", response_model=StatusResponse)
 def get_status(user_context: dict = Depends(Authorization)):
-    global cache
     return StatusResponse(
         status="success",
         server_message=f"Hello {user_context['label']}!",
@@ -159,6 +188,40 @@ def get_status(user_context: dict = Depends(Authorization)):
         user_permission_group=user_context['permission_group']
     )
     
+@apiserver.get("/case/{case_id}", response_model=CaseResponse)
+def get_case(case_id, user_context: dict = Depends(Authorization)):
+    global CASES
+
+    CASES = cases()
+    _case = CASES.get(case_id)
+
+    if _case: 
+        return CaseResponse(**_case)
+
+    message = 'Case Not Found'
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+
+@apiserver.post("/new_case", response_model=CaseResponse)
+async def new_case(req: Request, user_context: dict = Depends(Authorization)):
+    global CASES
+    data = await req.json()
+    case_id = new_uuid()
+
+    CASES = cases()
+    
+    CASES[case_id] = {
+        'status': 'Open',
+        'user_id': user_context['id'],
+        'case_id': case_id,
+        'request': data['request'],
+        'response': '',
+        'resolution_date': (datetime.now() + timedelta(days=7)).isoformat(timespec='minutes')
+    }
+
+    commit_cases()
+    
+    return CaseResponse(**CASES[case_id])
+
 #############################################################
 # 💖 Server Start Block
 def start_server(
@@ -168,7 +231,7 @@ def start_server(
     '''Start the FastAPI server using Uvicorn.'''
     global days_until_expiry
 
-    # Generate SSL Certs / API Key
+    # Generate API Key
     generate_required_private()
 
     port = PORT
@@ -181,3 +244,30 @@ def start_server(
         port=port,
         log_level="info"
     )
+
+def put_on_server(
+        APIKey,
+        request: Optional[str] = None,
+        get_or_post: Literal['GET', 'POST'] = 'GET',
+        PORT=8884
+    ):
+
+    valid_struct, label, permission_group, days_old, id = decrypt_api_key(APIKey)
+
+    global CASES
+    case_id = new_uuid()
+
+    CASES = cases()
+
+    CASES[case_id] = {
+        'status': 'Open',
+        'user_id': id,
+        'case_id': case_id,
+        'request': request or '',
+        'response': '',
+        'resolution_date': (datetime.now() + timedelta(days=7)).isoformat(timespec='minutes')
+    }
+
+    commit_cases()
+
+    return CASES[case_id]
