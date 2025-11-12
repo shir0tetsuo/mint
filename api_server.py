@@ -1,16 +1,14 @@
-import inspect
 import os
 import json
 import subprocess
 import threading
 import uuid
-import requests
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Any, Type, Tuple, Union, Optional, Dict, List, Literal, NewType
+from typing import Optional, NewType
 
-from fastapi import FastAPI, Request, Header, HTTPException, status, BackgroundTasks, Depends
+from fastapi import FastAPI, Request, Header, HTTPException, status, Depends
 from fastapi.security import APIKeyHeader
 from uvicorn import run as uvicorn_run
 from pydantic import BaseModel, Field
@@ -184,7 +182,6 @@ def get_status(user_context: dict = Depends(Authorization)):
         status="success",
         server_message=f"Hello {user_context['label']}!",
         version=get_git_version(),
-        # TODO : This will have to be patched with a len() solution.
         user_permission_group=user_context['permission_group']
     )
     
