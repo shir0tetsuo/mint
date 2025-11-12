@@ -211,6 +211,23 @@ def get_cases(user_context: dict = Depends(Authorization)):
             
     return my_cases
 
+@apiserver.get("/all_cases")
+def get_all_cases(user_context: dict = Depends(Authorization)):
+    global CASES
+
+    if user_context['permission_group'] != 'admin':
+        message = 'This is an admin-only route.'
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
+
+    all_cases = {}
+
+    CASES = cases()
+
+    for case_id, _case in CASES.items():
+        all_cases[case_id] = _case
+
+    return all_cases
+
 @apiserver.post("/new_case", response_model=CaseResponse)
 async def new_case(req: Request, user_context: dict = Depends(Authorization)):
     global CASES
