@@ -248,13 +248,14 @@ def start_server(
 def put_on_server(
         APIKey,
         request: Optional[str] = None,
-        get_or_post: Literal['GET', 'POST'] = 'GET',
-        PORT=8884
     ):
+    global CASES
 
     valid_struct, label, permission_group, days_old, id = decrypt_api_key(APIKey)
 
-    global CASES
+    if not valid_struct:
+        return
+
     case_id = new_uuid()
 
     CASES = cases()
