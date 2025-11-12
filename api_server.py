@@ -21,7 +21,6 @@ lock = threading.RLock()
 CASES, cases_file = None, Path(os.path.join(Path(__file__).parent.resolve(), 'cases.json'))
 PRIVKEY, api_privkey = None, Path(os.path.join(Path(__file__).parent.resolve(), 'PrivKey.json'))
 days_until_expiry = timedelta(days=30)
-#cache    : dict[APIKey, dict[str, Any]]     = {}
 apiserver = FastAPI(title="shadowsword.ca JSON Server")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True, scheme_name="APIKeyAuth")
 
@@ -198,6 +197,20 @@ def get_case(case_id, user_context: dict = Depends(Authorization)):
     message = 'Case Not Found'
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
 
+@apiserver.get("/my_cases")
+def get_cases(user_context: dict = Depends(Authorization)):
+    global CASES
+
+    my_cases = {}
+
+    CASES = cases()
+
+    for case_id, _case in CASES.items():
+        if _case['user_id'] == user_context['id']:
+            my_cases[case_id] = _case
+            
+    return my_cases
+
 @apiserver.post("/new_case", response_model=CaseResponse)
 async def new_case(req: Request, user_context: dict = Depends(Authorization)):
     global CASES
@@ -242,16 +255,14 @@ def start_server(
         log_level="info"
     )
 
-def put_on_server(
+def put_case(
         APIKey,
         request: Optional[str] = None,
     ):
     global CASES
 
     valid_struct, label, permission_group, days_old, id = decrypt_api_key(APIKey)
-
-    if not valid_struct:
-        return
+    if not valid_struct: return
 
     case_id = new_uuid()
 
@@ -269,3 +280,27 @@ def put_on_server(
     commit_cases()
 
     return CASES[case_id]
+
+def close_case(
+        APIKey,
+        CaseID
+    ):
+    global CASES
+
+    valid_struct, label, permission_group, days_old, id = decrypt_api_key(APIKey)
+    if not valid_struct: return
+
+    CASES = cases()
+    _case = CASES[CaseID]
+    if not _case: return
+
+    if permission_group != 'admin' or id != _case['user_id']: return
+
+    CASES[CaseID] = {
+        **_case,
+        'status': 'Closed'
+    }
+
+    commit_cases()
+
+    return CASES[CaseID]
